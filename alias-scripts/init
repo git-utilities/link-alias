@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+
+## Find true directory this script resides in
+__SOURCE__="${BASH_SOURCE[0]}"
+while [[ -h "${__SOURCE__}" ]]; do
+    __SOURCE__="$(find "${__SOURCE__}" -type l -ls | sed -n 's@^.* -> \(.*\)@\1@p')"
+done
+__NAME__="${__SOURCE__//*(*\/|.*)/}"
+__DIR__="$(cd -P "$(dirname "${__SOURCE__}")" && pwd)"
+__GDIR__="$(dirname "${__DIR__}")"
+__AUTHOR__='S0AndS0'
+__DESCRIPTION__='Wrapper for git init command, merges .gitignore with .git/info/exclude'
+
+
+set -Ee -o functrace
+
+
+## Provides: failure
+source "${__GDIR__}/shared_functions/modules/trap-failure/failure.sh"
+trap 'failure "LINENO" "BASH_LINENO" "${BASH_COMMAND}" "${?}"' ERR
+
+## Provides: __license__ <description> <author>
+source "${__GDIR__}/shared_functions/license.sh"
+
+
+_arguments_list=( "${@}" )
+printf 'Arguments list:\n'
+printf '  %s\n' "${_arguments_list[@]}"
+
+
+git init "${_arguments_list[*]}"
+_git_init_status="${?}"
+if grep -qE '\s+--bare\s?' <<<"${_arguments_list[*]}"; then
+    exit "${_git_init_status}"
+fi
+
+
+_repository_directory="${_arguments_list[@]:$(( ${#_arguments_list[@]} - 1 ))}"
+_repository_directory="${_repository_directory:-${PWD}}"
+
+_exclude_patterns="$(grep -v '#' "${_repository_directory}/.git/info/exclude")"
+if (( "${#_exclude_patterns}" )) && {
+  if [[ -f "${_repository_directory}/.gitignore" ]]; then
+      awk -v _exclude_patterns="${_exclude_patterns}" 'BEGIN {
+          delete _pattern_list;
+          split(_exclude_patterns, _pattern_array, "\n");
+          for (_index in _pattern_array) {
+              _pattern_list[_pattern_array[_index]]++;
+          }
+          delete _pattern_array;
+      }
+      {
+          _pattern_list[$0]++;
+      }
+      END {
+          for (_key in _pattern_list) {
+              print _key | "sort";
+          }
+      }' "${_repository_directory}/.gitignore" > "${_repository_directory}/.gitignore"
+      _git_ignore_write_status="${?}"
+  else
+      tee "${_repository_directory}/.gitignore" 1>/dev/null <<<"${_exclude_patterns}"
+      _git_ignore_write_status="${?}"
+  fi
+}
+
+
+exit "$(( "${_git_init_status:-0}" + "${_git_ignore_write_status:-0}" ))"
+
